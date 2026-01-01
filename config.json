@@ -1,0 +1,24 @@
+{
+  "api": {
+    "base_url": "https://api.ibilik.com",
+    "merchant_token": "YOUR_MERCHANT_TOKEN_HERE",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "origin": "https://apu.ibilik.com",
+    "referer": "https://apu.ibilik.com/",
+    "discovery_endpoint": "/merchant/meter",
+    "status_method": "POST"
+  },
+  "polling": {
+    "interval_seconds": 15
+  },
+  "database": {
+    "path": "data/meter_monitoring.db"
+  },
+  "meters": {
+    "manual_ids": []
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "data/meter_monitoring.log"
+  }
+}
