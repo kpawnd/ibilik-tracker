@@ -127,3 +127,35 @@ class APIClient:
 
         # Fallback for direct response
         return response
+
+    async def get_meter_transactions(self, meter_id: str, date_from: str, date_to: str) -> Dict[str, Any]:
+        """
+        Fetch transaction history for a meter within a date range.
+
+        Args:
+            meter_id: The ID of the meter to query
+            date_from: Start date in YYYY-MM-DD format
+            date_to: End date in YYYY-MM-DD format
+
+        Returns:
+            Dictionary of transactions (keyed by transaction ID)
+        """
+        logger.debug(f"Fetching transactions for meter {meter_id} from {date_from} to {date_to}")
+        response = await self._make_request(
+            "GET",
+            f"/merchant/meter/{meter_id}/transactions",
+            params={
+                "date_from": date_from,
+                "date_to": date_to
+            }
+        )
+
+        # Handle nested response structure: data -> transactions dict
+        if "data" in response:
+            data = response["data"]
+            # Convert list to dict if needed
+            if isinstance(data, list):
+                return {str(i): tx for i, tx in enumerate(data)}
+            return data if isinstance(data, dict) else {}
+
+        return {}

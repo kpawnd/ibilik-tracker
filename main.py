@@ -18,6 +18,7 @@ from discovery import MeterDiscovery
 from data_model import MeterSnapshot
 from tracker import MeterTracker
 from database import MeterDatabase
+from transactions import TransactionHistoryManager
 
 
 class MeterMonitor:
@@ -112,31 +113,62 @@ class MeterMonitor:
 
                     # Log status
                     poll_time = (datetime.now() - start_time).total_seconds()
-                    status = "ONLINE" if snapshot.is_online() else "OFFLINE"
+                    
+                    # Build comprehensive status message
+                    status = snapshot.get_connectivity_status()
 
-                    # Build status message with current values and delta information
-                    status_msg = f"{meter_name}: {status} | Poll time: {poll_time:.2f}s"
+                    # Build detailed status message
+                    status_parts = [
+                        f"{meter_name}",
+                        f"Status: {status}",
+                        f"Poll time: {poll_time:.2f}s",
+                    ]
 
-                    # Add current reading and balance values
+                    # Add meter identifier
+                    if snapshot.vendor_meter_id:
+                        status_parts.append(f"HW ID: {snapshot.vendor_meter_id}")
+
+                    # Add energy reading and consumption cost
                     current_reading = snapshot.get_current_reading()
-                    balance_unit = snapshot.get_balance_unit()
-
                     if current_reading is not None:
-                        status_msg += f" | Reading: {current_reading:.4f}"
-                    if balance_unit is not None:
-                        status_msg += f" | Balance: {balance_unit:.4f}"
+                        status_parts.append(f"Reading: {current_reading:.2f}")
+                        cost_estimate = snapshot.get_cost_estimate()
+                        if cost_estimate is not None and snapshot.currency:
+                            status_parts.append(f"Cost: {cost_estimate:.2f}{snapshot.currency}")
 
-                    # Add delta information to console output (only show if there are changes)
+                    # Add balance and cost of balance
+                    balance_unit = snapshot.get_balance_unit()
+                    if balance_unit is not None:
+                        status_parts.append(f"Balance: {balance_unit:.2f}")
+                        balance_cost = snapshot.get_balance_cost()
+                        if balance_cost is not None and snapshot.currency:
+                            status_parts.append(f"Balance $: {balance_cost:.2f}{snapshot.currency}")
+
+                    # Add balance warning info if low
+                    if snapshot.warning_at_unit and balance_unit is not None:
+                        if balance_unit <= snapshot.warning_at_unit:
+                            status_parts.append(f"⚠ LOW BALANCE (warn at {snapshot.warning_at_unit})")
+
+                    # Add pricing information
+                    if snapshot.unit_price and snapshot.currency:
+                        status_parts.append(f"Price: {snapshot.unit_price}{snapshot.currency}/unit")
+
+                    # Add delta information
                     delta_parts = []
                     if snapshot.current_reading_delta is not None and snapshot.current_reading_delta != 0:
-                        delta_parts.append(f"ΔReading: {snapshot.current_reading_delta:+.4f}")
+                        delta_parts.append(f"ΔReading: {snapshot.current_reading_delta:+.2f}")
                     if snapshot.balance_unit_delta is not None and snapshot.balance_unit_delta != 0:
-                        delta_parts.append(f"ΔBalance: {snapshot.balance_unit_delta:+.4f}")
+                        delta_parts.append(f"ΔBalance: {snapshot.balance_unit_delta:+.2f}")
 
                     if delta_parts:
-                        status_msg += f" | Changes: {' | '.join(delta_parts)}"
+                        status_parts.append(f"Changes: {' | '.join(delta_parts)}")
 
-                    print(status_msg)
+                    # Add last connection info
+                    if snapshot.last_connected_at:
+                        status_parts.append(f"Last conn: {snapshot.last_connected_at}")
+
+                    # Print the comprehensive status
+                    print(" | ".join(status_parts))
 
                 except asyncio.CancelledError:
                     break
@@ -213,15 +245,25 @@ class MeterMonitor:
             # Initialize system
             await self.initialize()
 
-            # Select meters to monitor
-            selected_meters = await self.select_meters()
+            # Display main menu
+            while True:
+                print("\nMAIN MENU:")
+                print("1. Start monitoring meters")
+                print("2. View transaction history for a meter")
+                print("3. Exit")
 
-            if not selected_meters:
-                print("No meters selected. Exiting.")
-                return
+                choice = input("\nEnter your choice (1-3): ").strip()
 
-            # Start monitoring
-            await self.start_monitoring(selected_meters)
+                if choice == "1":
+                    await self._run_monitoring()
+                    break
+                elif choice == "2":
+                    await self._view_transaction_history()
+                elif choice == "3":
+                    print("Exiting...")
+                    return
+                else:
+                    print("Invalid choice. Please enter 1-3")
 
         except KeyboardInterrupt:
             pass
@@ -231,6 +273,79 @@ class MeterMonitor:
         finally:
             if self.database:
                 self.database.close()
+
+    async def _run_monitoring(self) -> None:
+        """Run the meter monitoring."""
+        logger = logging.getLogger(__name__)
+
+        # Select meters to monitor
+        selected_meters = await self.select_meters()
+
+        if not selected_meters:
+            print("No meters selected. Returning to menu.")
+            return
+
+        # Start monitoring
+        await self.start_monitoring(selected_meters)
+
+    async def _view_transaction_history(self) -> None:
+        """View transaction history for a selected meter."""
+        logger = logging.getLogger(__name__)
+
+        try:
+            async with APIClient(self.config) as api_client:
+                # Get available meters
+                meters = await api_client.get_meters()
+                if not meters:
+                    print("No meters found")
+                    return
+
+                # Display meter options
+                print("\nAvailable meters:")
+                for i, meter in enumerate(meters, 1):
+                    meter_id = meter.get("id")
+                    name = meter.get("name", "Unknown")
+                    balance = meter.get("balance_unit", 0)
+                    reading = meter.get("current_reading", 0)
+                    print(f"{i}. {name} (ID: {meter_id})")
+                    print(f"   Reading: {reading:.2f} | Balance: {balance:.2f}")
+
+                # Let user select a meter
+                while True:
+                    choice = input("\nEnter meter number (or 'cancel' to return): ").strip()
+
+                    if choice.lower() == "cancel":
+                        return
+
+                    try:
+                        meter_idx = int(choice) - 1
+                        if 0 <= meter_idx < len(meters):
+                            selected_meter = meters[meter_idx]
+                            break
+                        else:
+                            print("Invalid meter number")
+                    except ValueError:
+                        print("Please enter a valid number or 'cancel'")
+
+                meter_id = selected_meter.get("id")
+                meter_name = selected_meter.get("name", f"Meter {meter_id}")
+
+                # Get date range from user
+                tx_manager = TransactionHistoryManager(self.config)
+                date_from, date_to = tx_manager.display_date_range_options()
+
+                if date_from is None or date_to is None:
+                    print("Cancelled")
+                    return
+
+                # Fetch and display transaction history
+                print(f"\nFetching transaction history for {meter_name}...")
+                result = await tx_manager.fetch_all_transactions(api_client, meter_id, date_from, date_to)
+                tx_manager.display_transaction_history(result)
+
+        except Exception as e:
+            logger.error(f"Error viewing transaction history: {e}")
+            print(f"Error: {e}")
 
 
 async def main():

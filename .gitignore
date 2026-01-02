@@ -2,6 +2,7 @@
 data/
 *.db
 *.log
+*.json
 
 # Python virtual environment
 venv/
