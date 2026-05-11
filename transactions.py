@@ -7,7 +7,7 @@ analysis and display functionality.
 
 import logging
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from api import APIClient
 from config import Config
 
@@ -25,15 +25,6 @@ class TransactionHistoryManager:
                                      date_to: Optional[str] = None) -> Dict[str, Any]:
         """
         Fetch all transactions for a meter within a date range.
-
-        Args:
-            api_client: APIClient instance
-            meter_id: Meter ID to fetch transactions for
-            date_from: Start date (YYYY-MM-DD), default: 1 year ago
-            date_to: End date (YYYY-MM-DD), default: today
-
-        Returns:
-            Dictionary of transactions with analysis
         """
         # Set default date range (last year if not specified)
         if not date_to:
@@ -59,12 +50,6 @@ class TransactionHistoryManager:
     def _analyze_transactions(self, transactions: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze transactions to extract summary statistics.
-
-        Args:
-            transactions: Dictionary of transaction data
-
-        Returns:
-            Analysis dictionary with statistics
         """
         if not transactions:
             return {
@@ -79,6 +64,7 @@ class TransactionHistoryManager:
         total_amount = 0
         total_units = 0
         transactions_list = []
+        unit_prices = []
 
         for key, tx in transactions.items():
             if not isinstance(tx, dict):
@@ -94,8 +80,8 @@ class TransactionHistoryManager:
                     "avg_units": 0,
                 }
 
-            amount = float(tx.get("total_price", 0))
-            units = float(tx.get("unit", 0))
+            amount = self._safe_float(tx.get("total_price", 0))
+            units = self._safe_float(tx.get("unit", 0))
 
             by_type[tx_type]["count"] += 1
             by_type[tx_type]["total_amount"] += amount
@@ -104,6 +90,9 @@ class TransactionHistoryManager:
             total_amount += amount
             total_units += units
             transactions_list.append(tx)
+
+            if units > 0 and amount > 0:
+                unit_prices.append(amount / units)
 
         # Calculate averages
         for tx_type in by_type:
@@ -118,6 +107,15 @@ class TransactionHistoryManager:
             reverse=True
         )
 
+        unit_price_stats = {}
+        if unit_prices:
+            unit_price_stats = {
+                "count_priced": len(unit_prices),
+                "avg_unit_price": sum(unit_prices) / len(unit_prices),
+                "min_unit_price": min(unit_prices),
+                "max_unit_price": max(unit_prices)
+            }
+
         return {
             "total_transactions": len(transactions_list),
             "total_amount": total_amount,
@@ -125,14 +123,110 @@ class TransactionHistoryManager:
             "by_type": by_type,
             "oldest_transaction": transactions_list[-1].get("created_at") if transactions_list else None,
             "newest_transaction": transactions_list[0].get("created_at") if transactions_list else None,
+            "unit_price_stats": unit_price_stats
         }
+
+    def summarize_transactions_window(
+        self,
+        transactions: Dict[str, Any],
+        window_start: datetime,
+        window_end: datetime
+    ) -> Dict[str, Any]:
+        """
+        Summarize transactions within a specific time window.
+        """
+        filtered = self._filter_transactions_by_time(transactions, window_start, window_end)
+        analysis = self._analyze_transactions(filtered)
+        return {
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "analysis": analysis
+        }
+
+    def _filter_transactions_by_time(
+        self,
+        transactions: Dict[str, Any],
+        window_start: datetime,
+        window_end: datetime
+    ) -> Dict[str, Any]:
+        """
+        Filter transactions by created_at timestamp.
+        """
+        if not transactions:
+            return {}
+
+        start_dt = self._normalize_datetime(window_start)
+        end_dt = self._normalize_datetime(window_end)
+        filtered = {}
+
+        for key, tx in transactions.items():
+            if not isinstance(tx, dict):
+                continue
+
+            created_at = tx.get("created_at") or tx.get("updated_at")
+            created_dt = self._parse_tx_datetime(created_at)
+            if not created_dt:
+                continue
+
+            if start_dt <= created_dt <= end_dt:
+                filtered[key] = tx
+
+        return filtered
+
+    def _parse_tx_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        """
+        Parse transaction datetime strings into normalized datetime objects.
+        """
+        if not value or not isinstance(value, str):
+            return None
+
+        value = value.strip()
+        if not value:
+            return None
+
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return self._normalize_datetime(dt)
+        except ValueError:
+            pass
+
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(value, fmt)
+                return self._normalize_datetime(dt)
+            except ValueError:
+                continue
+
+        return None
+
+    def _normalize_datetime(self, dt: datetime) -> datetime:
+        """
+        Normalize datetime objects to naive UTC for comparison.
+
+        Args:
+            dt: Datetime object
+
+        Returns:
+            Naive UTC datetime
+        """
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    def _safe_float(self, value: Any, default: float = 0.0) -> float:
+        """
+        Safely convert values to float.
+        """
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (ValueError, TypeError):
+            return default
 
     def display_transaction_history(self, result: Dict[str, Any]) -> None:
         """
         Display transaction history in a formatted way.
-
-        Args:
-            result: Result dictionary from fetch_all_transactions
         """
         meter_id = result["meter_id"]
         date_from = result["date_from"]
@@ -195,9 +289,6 @@ class TransactionHistoryManager:
     def display_date_range_options(self) -> Tuple[str, str]:
         """
         Display date range options and let user choose.
-
-        Returns:
-            Tuple of (date_from, date_to) in YYYY-MM-DD format
         """
         print("\nSelect date range for transaction history:")
         print("1. Last 30 days")

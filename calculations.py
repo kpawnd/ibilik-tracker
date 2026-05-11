@@ -46,13 +46,6 @@ class MeterCalculations:
     def compute_balance_delta(current_balance: Any, previous_balance: Any) -> Optional[float]:
         """
         Compute the delta between two balance values.
-
-        Args:
-            current_balance: Current balance value
-            previous_balance: Previous balance value
-
-        Returns:
-            The delta value, or None if computation is not possible
         """
         try:
             # Only compute delta if both values are numeric
@@ -67,13 +60,6 @@ class MeterCalculations:
     def validate_numeric_field(value: Any, field_name: str) -> Optional[float]:
         """
         Validate and convert a value to float if it's numeric.
-
-        Args:
-            value: The value to validate
-            field_name: Name of the field (for logging)
-
-        Returns:
-            Float value if valid, None otherwise
         """
         try:
             if isinstance(value, (int, float)):
@@ -89,18 +75,21 @@ class MeterCalculations:
             return None
 
     @staticmethod
-    def detect_anomalies(snapshot: MeterSnapshot, previous_snapshot: Optional[MeterSnapshot] = None) -> Dict[str, Any]:
+    def detect_anomalies(
+        snapshot: MeterSnapshot,
+        previous_snapshot: Optional[MeterSnapshot] = None,
+        thresholds: Optional[Dict[str, Any]] = None,
+        reconciliation: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Detect potential anomalies in meter data without making assumptions about normal behavior.
-
-        Args:
-            snapshot: Current meter snapshot
-            previous_snapshot: Previous snapshot for comparison
-
-        Returns:
-            Dictionary of detected anomalies
         """
-        anomalies = {}
+        anomalies: Dict[str, Any] = {}
+        thresholds = thresholds or {}
+        max_reading_delta = thresholds.get("max_reading_delta", 1000)
+        max_balance_delta = thresholds.get("max_balance_delta", 1000)
+        price_change_tolerance = thresholds.get("price_change_tolerance", 0.05)
+        balance_recon_tolerance = thresholds.get("balance_reconciliation_tolerance", 0.5)
 
         if not snapshot.poll_successful:
             return anomalies  # Don't detect anomalies on failed polls
@@ -114,46 +103,162 @@ class MeterCalculations:
                     "delta": snapshot.current_reading_delta
                 }
 
-        # Check for extreme delta values (arbitrarily large changes)
+        # Check for extreme delta values
         if snapshot.current_reading_delta is not None:
-            # Flag if delta is more than 1000 units (arbitrary threshold)
-            if abs(snapshot.current_reading_delta) > 1000:
+            if abs(snapshot.current_reading_delta) > max_reading_delta:
                 anomalies["extreme_reading_delta"] = {
                     "delta": snapshot.current_reading_delta,
-                    "threshold": 1000
+                    "threshold": max_reading_delta
                 }
 
         if snapshot.balance_unit_delta is not None:
-            # Flag if balance changes by more than 1000 units
-            if abs(snapshot.balance_unit_delta) > 1000:
+            if abs(snapshot.balance_unit_delta) > max_balance_delta:
                 anomalies["extreme_balance_delta"] = {
                     "delta": snapshot.balance_unit_delta,
-                    "threshold": 1000
+                    "threshold": max_balance_delta
                 }
+
+        # Check for unit price changes between polls
+        if previous_snapshot and snapshot.unit_price is not None and previous_snapshot.unit_price is not None:
+            previous_price = previous_snapshot.unit_price
+            if previous_price != 0:
+                price_change = snapshot.unit_price - previous_price
+                price_change_ratio = abs(price_change) / abs(previous_price)
+                if price_change_ratio > price_change_tolerance:
+                    anomalies["unit_price_change"] = {
+                        "current": snapshot.unit_price,
+                        "previous": previous_price,
+                        "delta": price_change,
+                        "change_ratio": price_change_ratio,
+                        "tolerance": price_change_tolerance
+                    }
 
         # Check for connectivity changes
         if previous_snapshot:
-            current_online = snapshot.is_online()
-            previous_online = previous_snapshot.is_online()
-            if current_online != previous_online:
-                anomalies["connectivity_change"] = {
+            current_online = snapshot.is_online
+            previous_online = previous_snapshot.is_online
+            if current_online is not None and previous_online is not None and current_online != previous_online:
+                anomalies["online_status_change"] = {
                     "from": previous_online,
                     "to": current_online
                 }
 
+            current_connected = snapshot.is_connected
+            previous_connected = previous_snapshot.is_connected
+            if current_connected is not None and previous_connected is not None and current_connected != previous_connected:
+                anomalies["connection_status_change"] = {
+                    "from": previous_connected,
+                    "to": current_connected
+                }
+
+            current_active = snapshot.is_active
+            previous_active = previous_snapshot.is_active
+            if current_active is not None and previous_active is not None and current_active != previous_active:
+                anomalies["active_status_change"] = {
+                    "from": previous_active,
+                    "to": current_active
+                }
+
+        # Reconciliation-based anomalies
+        if reconciliation:
+            balance_info = reconciliation.get("balance", {})
+            if balance_info.get("within_tolerance") is False:
+                anomalies["balance_reconciliation_mismatch"] = balance_info
+
+            price_info = reconciliation.get("price", {})
+            if price_info.get("within_tolerance") is False:
+                anomalies["transaction_price_mismatch"] = price_info
+
+            transactions = reconciliation.get("transactions", {})
+            if snapshot.balance_unit_delta is not None and snapshot.balance_unit_delta > 0:
+                if transactions.get("total_units", 0) == 0 and (snapshot.current_reading_delta is None or snapshot.current_reading_delta >= 0):
+                    if snapshot.balance_unit_delta > balance_recon_tolerance:
+                        anomalies["balance_increase_without_topup"] = {
+                            "balance_delta": snapshot.balance_unit_delta,
+                            "tolerance": balance_recon_tolerance
+                        }
+
         return anomalies
+
+    @staticmethod
+    def compute_reconciliation(
+        snapshot: MeterSnapshot,
+        previous_snapshot: Optional[MeterSnapshot],
+        tx_summary: Dict[str, Any],
+        thresholds: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Compute reconciliation details between meter deltas and transactions.
+        """
+        thresholds = thresholds or {}
+        balance_tolerance = thresholds.get("balance_reconciliation_tolerance", 0.5)
+        price_tolerance = thresholds.get("price_reconciliation_tolerance", 0.05)
+
+        analysis = tx_summary.get("analysis", {})
+        unit_price_stats = analysis.get("unit_price_stats", {})
+
+        result: Dict[str, Any] = {
+            "window_start": tx_summary.get("window_start"),
+            "window_end": tx_summary.get("window_end"),
+            "transactions": {
+                "count": analysis.get("total_transactions", 0),
+                "total_units": analysis.get("total_units", 0),
+                "total_amount": analysis.get("total_amount", 0),
+                "unit_price_stats": unit_price_stats
+            },
+            "snapshot": {
+                "current_reading": snapshot.get_current_reading(),
+                "balance_unit": snapshot.get_balance_unit(),
+                "unit_price": snapshot.unit_price,
+                "current_reading_delta": snapshot.current_reading_delta,
+                "balance_unit_delta": snapshot.balance_unit_delta
+            }
+        }
+
+        topup_units = analysis.get("total_units", 0)
+        expected_balance_delta = None
+        actual_balance_delta = snapshot.balance_unit_delta
+
+        if snapshot.current_reading_delta is not None:
+            expected_balance_delta = -snapshot.current_reading_delta + topup_units
+
+        if expected_balance_delta is not None and actual_balance_delta is not None:
+            mismatch = actual_balance_delta - expected_balance_delta
+            mismatch_abs = abs(mismatch)
+            result["balance"] = {
+                "expected_delta": expected_balance_delta,
+                "actual_delta": actual_balance_delta,
+                "mismatch": mismatch,
+                "mismatch_abs": mismatch_abs,
+                "tolerance": balance_tolerance,
+                "within_tolerance": mismatch_abs <= balance_tolerance
+            }
+        else:
+            result["balance"] = {"status": "insufficient_data"}
+
+        unit_price = snapshot.unit_price
+        avg_tx_price = unit_price_stats.get("avg_unit_price")
+
+        if unit_price is not None and avg_tx_price is not None and unit_price != 0:
+            price_diff = avg_tx_price - unit_price
+            price_diff_ratio = abs(price_diff) / abs(unit_price)
+            result["price"] = {
+                "unit_price": unit_price,
+                "avg_transaction_unit_price": avg_tx_price,
+                "diff": price_diff,
+                "diff_ratio": price_diff_ratio,
+                "tolerance": price_tolerance,
+                "within_tolerance": price_diff_ratio <= price_tolerance
+            }
+        else:
+            result["price"] = {"status": "insufficient_data"}
+
+        return result
 
     @staticmethod
     def compute_statistics(meter_id: str, snapshots: list[MeterSnapshot]) -> Dict[str, Any]:
         """
         Compute basic statistics for a series of snapshots.
-
-        Args:
-            meter_id: The meter identifier
-            snapshots: List of snapshots to analyze
-
-        Returns:
-            Dictionary with computed statistics
         """
         if not snapshots:
             return {"meter_id": meter_id, "error": "No snapshots provided"}
@@ -212,3 +317,40 @@ class MeterCalculations:
             }
 
         return stats
+
+    @staticmethod
+    def summarize_daily_usage(
+        daily_usage: list[Dict[str, Any]],
+        spike_multiplier: float = 2.0
+    ) -> Dict[str, Any]:
+        """Summarize daily usage totals for a chart window."""
+        if not daily_usage:
+            return {
+                "total": 0,
+                "average": 0,
+                "highest": None,
+                "lowest": None,
+                "spikes": []
+            }
+
+        values = [entry.get("usage", 0) or 0 for entry in daily_usage]
+        total = sum(values)
+        average = total / len(values) if values else 0
+        highest_entry = max(daily_usage, key=lambda entry: entry.get("usage", 0) or 0)
+        lowest_entry = min(daily_usage, key=lambda entry: entry.get("usage", 0) or 0)
+
+        spikes = []
+        if average > 0:
+            spikes = [
+                entry
+                for entry in daily_usage
+                if (entry.get("usage", 0) or 0) >= average * spike_multiplier
+            ]
+
+        return {
+            "total": total,
+            "average": average,
+            "highest": highest_entry,
+            "lowest": lowest_entry,
+            "spikes": spikes
+        }

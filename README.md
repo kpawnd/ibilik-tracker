@@ -39,12 +39,33 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Run the background service without the TUI:
+
+```bash
+python main.py --service
+```
+
 ## Usage
 
-1. Run `python main.py`
-2. Select meters to monitor (single meter or all)
-3. View real-time data in the console
-4. Data is automatically saved to `data/meter_monitoring.db`
+1. Run `python main.py` to open the TUI.
+2. The dashboard shows live meter data and weekly usage charts.
+3. Use the Settings tab to adjust polling interval, reminder threshold, and webhooks.
+4. Data is stored in `data/meter_monitoring.db` for charts and alerts.
+
+The TUI starts the monitoring service automatically. Use `python main.py --no-service` to view stored data without polling.
+
+### Reminder Webhooks
+
+Add webhook URLs in the Settings tab or edit config.json:
+
+```json
+"reminders": {
+  "enabled": true,
+  "low_balance_threshold": 40,
+  "cooldown_minutes": 120,
+  "webhooks": ["https://example.com/webhook"]
+}
+```
 
 ## License
 

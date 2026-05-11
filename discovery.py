@@ -23,9 +23,6 @@ class MeterDiscovery:
     async def get_available_meters(self) -> List[Dict[str, Any]]:
         """
         Fetch all available meters for the authenticated user.
-
-        Returns:
-            List of meter dictionaries with their metadata, or empty list if discovery fails
         """
         try:
             meters = await self.api_client.get_meters()
@@ -39,9 +36,6 @@ class MeterDiscovery:
     def display_meter_options(self, meters: List[Dict[str, Any]]) -> None:
         """
         Display available meters in a user-friendly format.
-
-        Args:
-            meters: List of meter dictionaries
         """
         if not meters:
             print("No meters found for this account.")
@@ -61,12 +55,6 @@ class MeterDiscovery:
     def select_meters_interactive(self, meters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Present an interactive prompt for meter selection.
-
-        Args:
-            meters: List of available meters
-
-        Returns:
-            List of selected meter dictionaries
         """
         if not meters:
             return []
@@ -104,9 +92,6 @@ class MeterDiscovery:
     async def discover_and_select_meters(self) -> List[Dict[str, Any]]:
         """
         Complete workflow: discover meters and let user select which ones to monitor.
-
-        Returns:
-            List of selected meters
         """
         # First check if meter IDs are configured
         configured_ids = self.config.manual_meter_ids
@@ -134,9 +119,6 @@ class MeterDiscovery:
     def manual_meter_entry(self) -> List[Dict[str, Any]]:
         """
         Allow manual entry of meter IDs when automatic discovery fails.
-
-        Returns:
-            List of meter dictionaries with manually entered IDs
         """
         print("\nAutomatic meter discovery failed.")
         print("You can manually enter meter IDs to monitor.")

@@ -27,12 +27,6 @@ class MeterTracker:
     def update_meter_state(self, snapshot: MeterSnapshot) -> MeterSnapshot:
         """
         Update the tracker with a new snapshot and compute deltas.
-
-        Args:
-            snapshot: The new meter snapshot
-
-        Returns:
-            The snapshot with computed deltas (modified in-place)
         """
         meter_id = snapshot.meter_id
 
@@ -59,21 +53,12 @@ class MeterTracker:
     def get_previous_snapshot(self, meter_id: str) -> Optional[MeterSnapshot]:
         """
         Get the most recent successful snapshot for a meter.
-
-        Args:
-            meter_id: The meter identifier
-
-        Returns:
-            The previous snapshot, or None if no previous data exists
         """
         return self._previous_snapshots.get(meter_id)
 
     def remove_meter(self, meter_id: str) -> None:
         """
         Remove a meter from tracking (e.g., when it's no longer available).
-
-        Args:
-            meter_id: The meter identifier to remove
         """
         if meter_id in self._previous_snapshots:
             del self._previous_snapshots[meter_id]
@@ -82,21 +67,12 @@ class MeterTracker:
     def get_tracked_meters(self) -> list[str]:
         """
         Get a list of all currently tracked meter IDs.
-
-        Returns:
-            List of meter IDs being tracked
         """
         return list(self._previous_snapshots.keys())
 
     def get_meter_stats(self, meter_id: str) -> Optional[Dict[str, Any]]:
         """
         Get statistics for a tracked meter.
-
-        Args:
-            meter_id: The meter identifier
-
-        Returns:
-            Dictionary with meter statistics, or None if meter not tracked
         """
         previous = self.get_previous_snapshot(meter_id)
         if not previous:
@@ -108,5 +84,5 @@ class MeterTracker:
             "last_reading": previous.get_current_reading(),
             "last_balance": previous.get_balance_unit(),
             "last_poll_time": previous.local_timestamp.isoformat(),
-            "is_online": previous.is_online()
+            "is_online": previous.is_online
         }

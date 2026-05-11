@@ -9,7 +9,8 @@
     "status_method": "POST"
   },
   "polling": {
-    "interval_seconds": 15
+    "interval_seconds": 15,
+    "per_meter_overrides": {}
   },
   "database": {
     "path": "data/meter_monitoring.db"
@@ -20,5 +21,34 @@
   "logging": {
     "level": "INFO",
     "file": "data/meter_monitoring.log"
+  },
+  "anomalies": {
+    "max_reading_delta": 1000,
+    "max_balance_delta": 1000,
+    "price_change_tolerance": 0.05,
+    "balance_reconciliation_tolerance": 0.5,
+    "price_reconciliation_tolerance": 0.05
+  },
+  "reconciliation": {
+    "enabled": true,
+    "interval_minutes": 60,
+    "lookback_days": 7
+  },
+  "reporting": {
+    "default_days": 7,
+    "max_events": 200
+  },
+  "reminders": {
+    "enabled": true,
+    "low_balance_threshold": 40,
+    "cooldown_minutes": 120,
+    "webhooks": []
+  },
+  "usage": {
+    "window_days": 7,
+    "spike_multiplier": 2.0
+  },
+  "tui": {
+    "refresh_seconds": 5
   }
 }

@@ -54,19 +54,15 @@ class MeterSnapshot:
     poll_successful: bool = True
     error_message: Optional[str] = None
 
+    # Evidence and reconciliation
+    anomalies: Optional[Dict[str, Any]] = None
+    reconciliation: Optional[Dict[str, Any]] = None
+
     @classmethod
     def from_api_response(cls, meter_id: str, api_response: Dict[str, Any],
                          previous_snapshot: Optional['MeterSnapshot'] = None) -> 'MeterSnapshot':
         """
         Create a MeterSnapshot from API response data.
-
-        Args:
-            meter_id: The meter identifier
-            api_response: Raw response from the API
-            previous_snapshot: Previous snapshot for delta calculation
-
-        Returns:
-            New MeterSnapshot instance
         """
         snapshot = cls(
             meter_id=meter_id,
@@ -101,13 +97,6 @@ class MeterSnapshot:
     def create_error_snapshot(cls, meter_id: str, error_message: str) -> 'MeterSnapshot':
         """
         Create a snapshot representing a failed poll.
-
-        Args:
-            meter_id: The meter identifier
-            error_message: Description of the error
-
-        Returns:
-            Error MeterSnapshot instance
         """
         return cls(
             meter_id=meter_id,
@@ -118,9 +107,6 @@ class MeterSnapshot:
     def _compute_deltas(self, previous: 'MeterSnapshot') -> None:
         """
         Compute deltas for numeric fields compared to previous snapshot.
-
-        Args:
-            previous: The previous meter snapshot
         """
         # Compute delta for current_reading if both values are numeric
         current_reading = self.raw_data.get("current_reading")
@@ -177,9 +163,6 @@ class MeterSnapshot:
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert the snapshot to a dictionary for database storage.
-
-        Returns:
-            Dictionary representation suitable for database insertion
         """
         return {
             "meter_id": self.meter_id,
@@ -189,6 +172,8 @@ class MeterSnapshot:
             "api_timestamp": self.api_timestamp,
             "last_connected_at": self.last_connected_at,
             "raw_data": self.raw_data,
+            "current_reading": self.get_current_reading(),
+            "balance_unit": self.get_balance_unit(),
             "current_reading_delta": self.current_reading_delta,
             "balance_unit_delta": self.balance_unit_delta,
             "currency": self.currency,
@@ -204,5 +189,7 @@ class MeterSnapshot:
             "is_active": self.is_active,
             "poll_successful": self.poll_successful,
             "error_message": self.error_message,
-            "connectivity_status": self.get_connectivity_status() if self.poll_successful else "ERROR"
+            "connectivity_status": self.get_connectivity_status() if self.poll_successful else "ERROR",
+            "anomalies": self.anomalies,
+            "reconciliation": self.reconciliation
         }

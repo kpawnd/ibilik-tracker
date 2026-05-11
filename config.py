@@ -93,6 +93,11 @@ class Config:
         return self._config["polling"]["interval_seconds"]
 
     @property
+    def polling_overrides(self) -> Dict[str, int]:
+        """Get per-meter polling interval overrides."""
+        return self._config.get("polling", {}).get("per_meter_overrides", {})
+
+    @property
     def database_path(self) -> str:
         """Get the database file path."""
         return self._config["database"]["path"]
@@ -111,6 +116,91 @@ class Config:
     def manual_meter_ids(self) -> list[str]:
         """Get manually configured meter IDs."""
         return self._config.get("meters", {}).get("manual_ids", [])
+
+    @property
+    def anomaly_max_reading_delta(self) -> float:
+        """Get the maximum allowed reading delta before flagging."""
+        return float(self._config.get("anomalies", {}).get("max_reading_delta", 1000))
+
+    @property
+    def anomaly_max_balance_delta(self) -> float:
+        """Get the maximum allowed balance delta before flagging."""
+        return float(self._config.get("anomalies", {}).get("max_balance_delta", 1000))
+
+    @property
+    def anomaly_price_change_tolerance(self) -> float:
+        """Get the tolerance for unit price changes between polls."""
+        return float(self._config.get("anomalies", {}).get("price_change_tolerance", 0.05))
+
+    @property
+    def anomaly_balance_reconciliation_tolerance(self) -> float:
+        """Get the tolerance for balance reconciliation mismatches."""
+        return float(self._config.get("anomalies", {}).get("balance_reconciliation_tolerance", 0.5))
+
+    @property
+    def anomaly_price_reconciliation_tolerance(self) -> float:
+        """Get the tolerance for transaction price mismatches."""
+        return float(self._config.get("anomalies", {}).get("price_reconciliation_tolerance", 0.05))
+
+    @property
+    def reconciliation_enabled(self) -> bool:
+        """Return whether reconciliation checks are enabled."""
+        return bool(self._config.get("reconciliation", {}).get("enabled", False))
+
+    @property
+    def reconciliation_interval_minutes(self) -> int:
+        """Get reconciliation interval in minutes."""
+        return int(self._config.get("reconciliation", {}).get("interval_minutes", 60))
+
+    @property
+    def reconciliation_lookback_days(self) -> int:
+        """Get reconciliation lookback period in days."""
+        return int(self._config.get("reconciliation", {}).get("lookback_days", 7))
+
+    @property
+    def report_default_days(self) -> int:
+        """Get default reporting window in days."""
+        return int(self._config.get("reporting", {}).get("default_days", 7))
+
+    @property
+    def report_max_events(self) -> int:
+        """Get maximum number of report events to display."""
+        return int(self._config.get("reporting", {}).get("max_events", 200))
+
+    @property
+    def reminders_enabled(self) -> bool:
+        """Return whether low-balance reminders are enabled."""
+        return bool(self._config.get("reminders", {}).get("enabled", True))
+
+    @property
+    def reminders_low_balance_threshold(self) -> float:
+        """Get low-balance threshold for reminders."""
+        return float(self._config.get("reminders", {}).get("low_balance_threshold", 40))
+
+    @property
+    def reminders_cooldown_minutes(self) -> int:
+        """Get reminder cooldown in minutes."""
+        return int(self._config.get("reminders", {}).get("cooldown_minutes", 120))
+
+    @property
+    def reminders_webhooks(self) -> list[str]:
+        """Get webhook endpoints to deliver reminders."""
+        return list(self._config.get("reminders", {}).get("webhooks", []))
+
+    @property
+    def usage_window_days(self) -> int:
+        """Get the number of days to include in usage charts."""
+        return int(self._config.get("usage", {}).get("window_days", 7))
+
+    @property
+    def usage_spike_multiplier(self) -> float:
+        """Get the multiplier for usage spike detection."""
+        return float(self._config.get("usage", {}).get("spike_multiplier", 2.0))
+
+    @property
+    def tui_refresh_seconds(self) -> int:
+        """Get the refresh interval for the TUI."""
+        return int(self._config.get("tui", {}).get("refresh_seconds", 5))
 
     def get_raw_config(self) -> Dict[str, Any]:
         """Get the raw configuration dictionary."""
