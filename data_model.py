@@ -64,13 +64,23 @@ class MeterSnapshot:
         """
         Create a MeterSnapshot from API response data.
         """
+        meter_id = str(meter_id)
+
+        # Strip static QR metadata
+        raw = {k: v for k, v in api_response.items() if k != "qr_value"}
+
+        # Normalise boolean fields: the API returns is_connected as int 1/0
+        # while is_online and is_active are returned as proper booleans.
+        def _as_bool(val: object) -> Optional[bool]:
+            return None if val is None else bool(val)
+
         snapshot = cls(
             meter_id=meter_id,
             meter_name=api_response.get("name"),
             vendor_meter_id=api_response.get("vendor_meter_id"),
             api_timestamp=api_response.get("updated_at"),
             last_connected_at=api_response.get("last_connected_at"),
-            raw_data=api_response.copy(),
+            raw_data=raw,
             # Financial data
             currency=api_response.get("currency"),
             unit_price=api_response.get("unit_price"),
@@ -80,14 +90,13 @@ class MeterSnapshot:
             free_unit_refresh_at=api_response.get("free_unit_refresh_at"),
             # Balance alerts
             warning_at_unit=api_response.get("warning_at_unit"),
-            is_low_balance_notification_sent=api_response.get("is_low_balance_notification_sent"),
-            # Status
-            is_online=api_response.get("is_online"),
-            is_connected=api_response.get("is_connected"),
-            is_active=api_response.get("is_active"),
+            is_low_balance_notification_sent=_as_bool(api_response.get("is_low_balance_notification_sent")),
+            # Status — normalise all three to bool regardless of API representation
+            is_online=_as_bool(api_response.get("is_online")),
+            is_connected=_as_bool(api_response.get("is_connected")),
+            is_active=_as_bool(api_response.get("is_active")),
         )
 
-        # Compute deltas if we have a previous snapshot
         if previous_snapshot:
             snapshot._compute_deltas(previous_snapshot)
 
@@ -99,7 +108,7 @@ class MeterSnapshot:
         Create a snapshot representing a failed poll.
         """
         return cls(
-            meter_id=meter_id,
+            meter_id=str(meter_id),
             poll_successful=False,
             error_message=error_message
         )
@@ -189,7 +198,6 @@ class MeterSnapshot:
             "is_active": self.is_active,
             "poll_successful": self.poll_successful,
             "error_message": self.error_message,
-            "connectivity_status": self.get_connectivity_status() if self.poll_successful else "ERROR",
             "anomalies": self.anomalies,
             "reconciliation": self.reconciliation
         }

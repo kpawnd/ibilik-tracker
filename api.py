@@ -65,6 +65,10 @@ class APIClient:
                 elif response.status == 403:
                     logger.error("Authorization failed - access denied")
                     raise ValueError("Authorization failed")
+                elif response.status == 429:
+                    retry_after = response.headers.get("Retry-After", "unknown")
+                    logger.warning("Rate limited by API (429); Retry-After: %s", retry_after)
+                    raise ValueError(f"Rate limited; retry after {retry_after}s")
                 elif response.status >= 400:
                     logger.error(f"API request failed with status {response.status}: {response.reason}")
                     response.raise_for_status()
@@ -121,12 +125,13 @@ class APIClient:
         logger.debug(f"Fetching status for meter {meter_id}")
         response = await self._make_request(self.config.status_method, f"/merchant/meter/{meter_id}/sync-status")
 
-        # Handle nested response structure: data -> meter data
         if "data" in response and isinstance(response["data"], dict):
             return response["data"]
 
-        # Fallback for direct response
-        return response
+        # Unexpected shape — return empty dict rather than the envelope, which would
+        # cause MeterSnapshot.from_api_response to silently store garbage fields.
+        logger.warning("Unexpected sync-status response shape for meter %s: %s", meter_id, list(response.keys()))
+        return {}
 
     async def get_meter_transactions(self, meter_id: str, date_from: str, date_to: str) -> Dict[str, Any]:
         """

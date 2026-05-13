@@ -43,7 +43,7 @@ async def run_service() -> None:
 def run_tui(start_service: bool) -> None:
     """Run the Textual TUI."""
     config = Config()
-    setup_logging(config)
+    setup_logging(config, console=False)
     app = MonitorApp(config, start_service=start_service)
     app.run()
 

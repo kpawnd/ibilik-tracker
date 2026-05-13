@@ -70,6 +70,9 @@ class TransactionHistoryManager:
             if not isinstance(tx, dict):
                 continue
 
+            if tx.get("deleted_at") is not None:
+                continue
+
             tx_type = tx.get("type", "UNKNOWN")
             if tx_type not in by_type:
                 by_type[tx_type] = {
@@ -82,6 +85,15 @@ class TransactionHistoryManager:
 
             amount = self._safe_float(tx.get("total_price", 0))
             units = self._safe_float(tx.get("unit", 0))
+
+            # Reject negative values — they indicate data corruption or an
+            # unexpected transaction type and would silently skew reconciliation.
+            if amount < 0 or units < 0:
+                logger.warning(
+                    "Ignoring transaction %s with negative amount/units: amount=%s units=%s",
+                    key, amount, units
+                )
+                continue
 
             by_type[tx_type]["count"] += 1
             by_type[tx_type]["total_amount"] += amount

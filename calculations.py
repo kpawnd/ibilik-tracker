@@ -185,10 +185,19 @@ class MeterCalculations:
         snapshot: MeterSnapshot,
         previous_snapshot: Optional[MeterSnapshot],
         tx_summary: Dict[str, Any],
-        thresholds: Optional[Dict[str, Any]] = None
+        thresholds: Optional[Dict[str, Any]] = None,
+        window_reading_start: Optional[float] = None,
+        window_balance_start: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Compute reconciliation details between meter deltas and transactions.
+
+        window_reading_start / window_balance_start are the meter values at the
+        beginning of the current reconciliation window.  When provided they are
+        used to compute window-level deltas so the energy-consumed estimate
+        covers the same time span as the fetched transactions.  Without them the
+        check falls back to the single-poll delta, which produces false anomalies
+        because a 15-second consumption is compared against an hour of top-ups.
         """
         thresholds = thresholds or {}
         balance_tolerance = thresholds.get("balance_reconciliation_tolerance", 0.5)
@@ -196,6 +205,21 @@ class MeterCalculations:
 
         analysis = tx_summary.get("analysis", {})
         unit_price_stats = analysis.get("unit_price_stats", {})
+
+        current_reading = snapshot.get_current_reading()
+        current_balance = snapshot.get_balance_unit()
+
+        # Prefer window-level deltas; fall back to single-poll deltas only when
+        # no window baseline has been established yet (first reconciliation run).
+        if window_reading_start is not None and current_reading is not None:
+            window_reading_delta: Optional[float] = current_reading - window_reading_start
+        else:
+            window_reading_delta = snapshot.current_reading_delta
+
+        if window_balance_start is not None and current_balance is not None:
+            window_balance_delta: Optional[float] = current_balance - window_balance_start
+        else:
+            window_balance_delta = snapshot.balance_unit_delta
 
         result: Dict[str, Any] = {
             "window_start": tx_summary.get("window_start"),
@@ -207,27 +231,27 @@ class MeterCalculations:
                 "unit_price_stats": unit_price_stats
             },
             "snapshot": {
-                "current_reading": snapshot.get_current_reading(),
-                "balance_unit": snapshot.get_balance_unit(),
+                "current_reading": current_reading,
+                "balance_unit": current_balance,
                 "unit_price": snapshot.unit_price,
-                "current_reading_delta": snapshot.current_reading_delta,
-                "balance_unit_delta": snapshot.balance_unit_delta
+                "window_reading_delta": window_reading_delta,
+                "window_balance_delta": window_balance_delta,
             }
         }
 
         topup_units = analysis.get("total_units", 0)
-        expected_balance_delta = None
-        actual_balance_delta = snapshot.balance_unit_delta
 
-        if snapshot.current_reading_delta is not None:
-            expected_balance_delta = -snapshot.current_reading_delta + topup_units
+        if window_reading_delta is not None:
+            expected_balance_delta = -window_reading_delta + topup_units
+        else:
+            expected_balance_delta = None
 
-        if expected_balance_delta is not None and actual_balance_delta is not None:
-            mismatch = actual_balance_delta - expected_balance_delta
+        if expected_balance_delta is not None and window_balance_delta is not None:
+            mismatch = window_balance_delta - expected_balance_delta
             mismatch_abs = abs(mismatch)
             result["balance"] = {
                 "expected_delta": expected_balance_delta,
-                "actual_delta": actual_balance_delta,
+                "actual_delta": window_balance_delta,
                 "mismatch": mismatch,
                 "mismatch_abs": mismatch_abs,
                 "tolerance": balance_tolerance,

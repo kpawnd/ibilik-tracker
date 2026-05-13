@@ -1,3 +1,6 @@
+# Ignore files that should not be committed to the repository
+CLAUDE.md
+
 # Database and data files
 data/
 *.db

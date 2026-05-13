@@ -36,6 +36,9 @@ class MeterDatabase:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
         self._connection = sqlite3.connect(self.db_path)
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=NORMAL")
+        self._connection.execute("PRAGMA busy_timeout=3000")
         self._create_tables()
         logger.info(f"Database initialized at {self.db_path}")
 
@@ -197,13 +200,13 @@ class MeterDatabase:
         cursor = self._connection.cursor()
 
         cursor.execute('''
-             SELECT id, meter_id, meter_name, vendor_meter_id, local_timestamp, api_timestamp,
+             SELECT id, CAST(meter_id AS TEXT) AS meter_id, meter_name, vendor_meter_id, local_timestamp, api_timestamp,
                  last_connected_at, raw_data, current_reading, balance_unit,
                  current_reading_delta, balance_unit_delta, currency, unit_price,
                  warning_at_unit, poll_successful, error_message, is_online,
                  is_connected, is_active, anomalies, reconciliation
             FROM meter_snapshots
-            WHERE meter_id = ?
+            WHERE CAST(meter_id AS TEXT) = ?
             ORDER BY local_timestamp DESC
             LIMIT ?
         ''', (meter_id, limit))
@@ -245,7 +248,7 @@ class MeterDatabase:
         cursor = self._connection.cursor()
 
         cursor.execute('''
-            SELECT ms.id, ms.meter_id, ms.meter_name, ms.vendor_meter_id,
+            SELECT ms.id, CAST(ms.meter_id AS TEXT) AS meter_id, ms.meter_name, ms.vendor_meter_id,
                    ms.local_timestamp, ms.api_timestamp, ms.last_connected_at,
                    ms.raw_data, ms.current_reading, ms.balance_unit,
                    ms.current_reading_delta, ms.balance_unit_delta, ms.currency,
@@ -298,14 +301,14 @@ class MeterDatabase:
         """Get daily usage totals for a meter."""
         cursor = self._connection.cursor()
 
-        end_date = datetime.utcnow().date()
+        end_date = datetime.now().date()
         start_date = end_date - timedelta(days=max(days - 1, 0))
 
         cursor.execute('''
             SELECT date(local_timestamp) AS usage_day,
                    SUM(CASE WHEN current_reading_delta > 0 THEN current_reading_delta ELSE 0 END) AS usage
             FROM meter_snapshots
-            WHERE meter_id = ?
+            WHERE CAST(meter_id AS TEXT) = ?
               AND poll_successful = 1
               AND local_timestamp >= ?
             GROUP BY date(local_timestamp)
@@ -314,6 +317,33 @@ class MeterDatabase:
 
         rows = cursor.fetchall()
         return [{"day": row[0], "usage": row[1] or 0} for row in rows]
+
+    def get_balance_history(self, meter_id: str, hours: int = 24) -> List[Dict[str, Any]]:
+        """Return balance_unit readings over the last N hours, one row per snapshot."""
+        cursor = self._connection.cursor()
+        since = (datetime.now() - timedelta(hours=hours)).isoformat()
+        cursor.execute('''
+            SELECT local_timestamp, balance_unit
+            FROM meter_snapshots
+            WHERE CAST(meter_id AS TEXT) = ?
+              AND poll_successful = 1
+              AND balance_unit IS NOT NULL
+              AND local_timestamp >= ?
+            ORDER BY local_timestamp
+        ''', (meter_id, since))
+        return [{"ts": row[0], "balance": row[1]} for row in cursor.fetchall()]
+
+    def export_daily_usage_csv(self, meter_id: str, days: int = 30) -> str:
+        """Export daily usage to CSV. Returns the output file path."""
+        import csv
+        rows = self.get_daily_usage(meter_id, days)
+        os.makedirs("data", exist_ok=True)
+        path = f"data/export_{meter_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["day", "usage"])
+            writer.writeheader()
+            writer.writerows(rows)
+        return path
 
     def get_meter_summary(self, meter_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -331,7 +361,7 @@ class MeterDatabase:
         cursor.execute('''
             SELECT COUNT(*), MIN(local_timestamp), MAX(local_timestamp)
             FROM meter_snapshots
-            WHERE meter_id = ? AND poll_successful = 1
+            WHERE CAST(meter_id AS TEXT) = ? AND poll_successful = 1
         ''', (meter_id,))
 
         row = cursor.fetchone()
@@ -344,7 +374,7 @@ class MeterDatabase:
         cursor.execute('''
             SELECT raw_data, current_reading_delta, balance_unit_delta
             FROM meter_snapshots
-            WHERE meter_id = ? AND poll_successful = 1
+            WHERE CAST(meter_id AS TEXT) = ? AND poll_successful = 1
             ORDER BY local_timestamp DESC
             LIMIT 1
         ''', (meter_id,))
@@ -372,7 +402,7 @@ class MeterDatabase:
         """
         cursor = self._connection.cursor()
         cursor.execute('''
-            SELECT DISTINCT meter_id
+            SELECT DISTINCT CAST(meter_id AS TEXT) AS meter_id
             FROM meter_snapshots
             ORDER BY meter_id
         ''')
@@ -402,7 +432,7 @@ class MeterDatabase:
         params: List[Any] = []
 
         if meter_id:
-            query.append("AND meter_id = ?")
+            query.append("AND CAST(meter_id AS TEXT) = ?")
             params.append(meter_id)
 
         if start_time:

@@ -34,6 +34,7 @@ class MonitoringService:
         self.monitoring_tasks: List[asyncio.Task] = []
         self.last_reconciliation_at: Dict[str, datetime] = {}
         self.last_reconciliation_result: Dict[str, Dict[str, Any]] = {}
+        self._recon_window_start: Dict[str, Dict[str, Any]] = {}
         self._settings_cache: Dict[str, Any] = {}
         self._settings_loaded_at: Optional[datetime] = None
 
@@ -83,25 +84,23 @@ class MonitoringService:
 
     async def monitor_meter(self, meter: Dict[str, Any]) -> None:
         """Monitor a single meter by polling its status periodically."""
-        meter_id = meter.get("id")
-        meter_name = meter.get("name", f"Meter {meter_id}")
-
-        if not meter_id:
+        meter_id_value = meter.get("id")
+        if meter_id_value is None:
             logger.warning("Skipping meter without an ID: %s", meter)
             return
+
+        meter_id = str(meter_id_value)
+        meter_name = meter.get("name", f"Meter {meter_id}")
 
         async with APIClient(self.config) as api_client:
             while self.running:
                 try:
                     meter_data = await api_client.get_meter_status(meter_id)
+
+                    # Pass no previous_snapshot here — tracker.update_meter_state
+                    # is the single place that computes deltas in the service loop.
+                    snapshot = MeterSnapshot.from_api_response(meter_id, meter_data)
                     previous_snapshot = self.tracker.get_previous_snapshot(meter_id)
-
-                    snapshot = MeterSnapshot.from_api_response(
-                        meter_id,
-                        meter_data,
-                        previous_snapshot
-                    )
-
                     self.tracker.update_meter_state(snapshot)
 
                     reconciliation = await self._maybe_reconcile(
@@ -274,6 +273,13 @@ class MonitoringService:
         window_start = last_recon if last_recon and last_recon > window_floor else window_floor
         window_end = now
 
+        # Record the meter readings at the start of this reconciliation window so
+        # compute_reconciliation can compare window-level deltas rather than the
+        # single-poll deltas on the current snapshot.
+        window_start_data = self._recon_window_start.get(meter_id, {})
+        window_reading_start = window_start_data.get("current_reading")
+        window_balance_start = window_start_data.get("balance_unit")
+
         try:
             date_from = window_start.strftime("%Y-%m-%d")
             date_to = window_end.strftime("%Y-%m-%d")
@@ -288,11 +294,20 @@ class MonitoringService:
                 snapshot,
                 previous_snapshot,
                 tx_summary,
-                self._get_anomaly_thresholds()
+                self._get_anomaly_thresholds(),
+                window_reading_start=window_reading_start,
+                window_balance_start=window_balance_start,
             )
 
             self.last_reconciliation_at[meter_id] = now
             self.last_reconciliation_result[meter_id] = reconciliation
+
+            # Reset window-start baseline for the next reconciliation window.
+            self._recon_window_start[meter_id] = {
+                "current_reading": snapshot.get_current_reading(),
+                "balance_unit": snapshot.get_balance_unit(),
+            }
+
             return reconciliation
         except Exception as exc:
             logger.warning("Reconciliation failed for meter %s: %s", meter_id, exc)

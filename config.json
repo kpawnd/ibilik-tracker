@@ -1,7 +1,7 @@
 {
   "api": {
     "base_url": "https://api.ibilik.com",
-    "merchant_token": "YOUR_MERCHANT_TOKEN_HERE",
+    "merchant_token": "your_merchant_token_here",
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "origin": "https://apu.ibilik.com",
     "referer": "https://apu.ibilik.com/",
@@ -9,7 +9,7 @@
     "status_method": "POST"
   },
   "polling": {
-    "interval_seconds": 15,
+    "interval_seconds": 10,
     "per_meter_overrides": {}
   },
   "database": {
@@ -40,8 +40,8 @@
   },
   "reminders": {
     "enabled": true,
-    "low_balance_threshold": 40,
-    "cooldown_minutes": 120,
+    "low_balance_threshold": 40.0,
+    "cooldown_minutes": 5,
     "webhooks": []
   },
   "usage": {
